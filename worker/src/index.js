@@ -15,6 +15,21 @@ import { makeStamp, publicKey } from "./stamp.js";
 
 const MAX_UPLOAD = 1024 * 1024; // phone apps are tiny
 
+// Files (stamped .appp, app.json, icons) live in D1 (table "files"): phone apps are small, and it needs no R2 (which
+// needs a card on the Cloudflare account). put/get look like a tiny R2.
+const files = (env) => ({
+  async put(key, data, type) {
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+    await env.DB.prepare("INSERT OR REPLACE INTO files (key, type, data) VALUES (?, ?, ?)").bind(key, type, bytes).run();
+  },
+  async get(key) {
+    const row = await env.DB.prepare("SELECT type, data FROM files WHERE key=?").bind(key).first();
+    if (!row) return null;
+    const bytes = new Uint8Array(row.data);
+    return { body: bytes, type: row.type, json: async () => JSON.parse(new TextDecoder().decode(bytes)) };
+  },
+});
+
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const validId = (id) => /^[0-9a-f]{12}$/.test(id);
 const newId = () => [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -112,9 +127,9 @@ async function upload(req, env) {
     const stamp = await makeStamp(env, parts, report.warnings);
     const zipped = zipSync({ ...parts, "stamp.json": enc(stamp) });
     size = zipped.length;
-    await env.FILES.put(`apps/${id}.appp`, zipped, { httpMetadata: { contentType: "application/vnd.appp+zip" } });
-    await env.FILES.put(`apps/${id}/app.json`, JSON.stringify({ id, manifest, app }), { httpMetadata: { contentType: "application/json" } });
-    if (iconBytes) await env.FILES.put(`icons/${id}.png`, iconBytes, { httpMetadata: { contentType: "image/png" } });
+    await files(env).put(`apps/${id}.appp`, zipped, "application/vnd.appp+zip");
+    await files(env).put(`apps/${id}/app.json`, JSON.stringify({ id, manifest, app }), "application/json");
+    if (iconBytes) await files(env).put(`icons/${id}.png`, iconBytes, "image/png");
   }
   await env.DB.prepare("INSERT INTO apps (id,status,name,version,author,description,permissions,report,uploaded_at,size) VALUES (?,?,?,?,?,?,?,?,?,?)")
     .bind(id, report.verdict, String(manifest?.name ?? file.name).slice(0, 40), String(manifest?.version ?? ""), String(manifest?.author ?? author),
@@ -142,7 +157,7 @@ async function appPage(env, id) {
   if (rep.notes?.length) details += `<h3>Checks</h3><ul class="rep dim">${list(rep.notes, "")}</ul>`;
   let shot = "";
   if (r.status === "clean") {
-    const obj = await env.FILES.get(`apps/${id}/app.json`);
+    const obj = await files(env).get(`apps/${id}/app.json`);
     if (obj) shot = preview((await obj.json()).app);
   }
   const status = r.status === "clean"
@@ -173,7 +188,7 @@ export default {
       }
       if (parts[0] === "api" && parts[1] === "phone" && parts[2] === "apps" && validId(parts[3] ?? "")) {
         const row = await env.DB.prepare("SELECT status FROM apps WHERE id=?").bind(parts[3]).first();
-        const obj = row?.status === "clean" ? await env.FILES.get(`apps/${parts[3]}/app.json`) : null;
+        const obj = row?.status === "clean" ? await files(env).get(`apps/${parts[3]}/app.json`) : null;
         return obj ? json(await obj.json()) : json({ error: "not found" }, 404);
       }
       if (parts[0] === "apps" && validId(parts[1] ?? "")) {
@@ -181,13 +196,13 @@ export default {
         if (parts.length === 2) return await appPage(env, id);
         if (parts[2] === "download") {
           const row = await env.DB.prepare("SELECT name,version,status FROM apps WHERE id=?").bind(id).first();
-          const obj = row?.status === "clean" ? await env.FILES.get(`apps/${id}.appp`) : null;
+          const obj = row?.status === "clean" ? await files(env).get(`apps/${id}.appp`) : null;
           if (!obj) return new Response("not found", { status: 404 });
           const fname = `${row.name}-${row.version}`.replace(/[^A-Za-z0-9.-]/g, "_") + ".appp";
           return new Response(obj.body, { headers: { "content-type": "application/vnd.appp+zip", "content-disposition": `attachment; filename="${fname}"` } });
         }
         if (parts[2] === "icon.png") {
-          const obj = await env.FILES.get(`icons/${id}.png`);
+          const obj = await files(env).get(`icons/${id}.png`);
           return obj ? new Response(obj.body, { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } }) : new Response("", { status: 404 });
         }
       }

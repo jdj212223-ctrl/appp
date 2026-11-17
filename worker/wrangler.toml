@@ -1,4 +1,4 @@
-# The RealismPhoneOS App Store on Cloudflare Workers: D1 keeps the app list, R2 keeps the .appp files.
+# The RealismPhoneOS App Store on Cloudflare Workers: D1 keeps the app list and the .appp files.
 name = "appp-store"
 main = "src/index.js"
 compatibility_date = "2026-11-01"
@@ -9,11 +9,9 @@ STORE_NAME = "RealismPhoneOS App Store"
 [[d1_databases]]
 binding = "DB"
 database_name = "appp"
-database_id = "REPLACE_WITH_D1_ID"   # npx wrangler d1 create appp
+database_id = "7773f2e0-cf21-4dd7-911b-852c42a7c3d2"
 
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "appp-files"           # npx wrangler r2 bucket create appp-files
+# Files (.appp packages, icons) are kept in D1 too: phone apps are small, so no R2 bucket is needed.
 
 # Secret (not in this file): STAMP_KEY, the Ed25519 private key that signs "scanned clean" stamps.
 #   node scripts/genkey.mjs            prints one

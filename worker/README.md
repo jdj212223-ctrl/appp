@@ -5,7 +5,7 @@ spyware, adware, broken), same "scanned clean" stamp (Rust `appp verify` checks 
 `appStoreUrl` can point here.
 
 - **Worker** (`src/index.js`): store page, upload, app pages with a phone preview, downloads, `/api/phone/apps`.
-- **D1** (`schema.sql`): the app list. **R2**: the stamped `.appp` files and icons.
+- **D1** (`schema.sql`): the app list and the stamped `.appp` files and icons (phone apps are small, so no R2 needed).
 - **Secret `STAMP_KEY`**: the Ed25519 key that signs stamps (`node scripts/genkey.mjs`).
 
 ## Try it locally (no Cloudflare account needed)
@@ -21,7 +21,6 @@ npm test               # the scan agrees with ../examples
 ```
 npx wrangler login                        # opens Cloudflare's sign-in page
 npx wrangler d1 create appp               # copy the database_id into wrangler.toml
-npx wrangler r2 bucket create appp-files
 npm run db:remote
 node scripts/genkey.mjs | cut -d= -f2- | npx wrangler secret put STAMP_KEY
 npm run deploy                            # → https://appp-store.<your-subdomain>.workers.dev
