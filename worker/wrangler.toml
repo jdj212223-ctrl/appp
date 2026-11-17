@@ -1,0 +1,20 @@
+# The RealismPhoneOS App Store on Cloudflare Workers: D1 keeps the app list, R2 keeps the .appp files.
+name = "appp-store"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+STORE_NAME = "RealismPhoneOS App Store"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "appp"
+database_id = "REPLACE_WITH_D1_ID"   # npx wrangler d1 create appp
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "appp-files"           # npx wrangler r2 bucket create appp-files
+
+# Secret (not in this file): STAMP_KEY, the Ed25519 private key that signs "scanned clean" stamps.
+#   node scripts/genkey.mjs            prints one
+#   npx wrangler secret put STAMP_KEY  stores it on Cloudflare (for local dev it goes in .dev.vars)
