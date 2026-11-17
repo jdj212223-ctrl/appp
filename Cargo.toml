@@ -1,0 +1,24 @@
+[package]
+name = "appp"
+version = "0.1.0"
+edition = "2021"
+description = "Our own app upload server and .appp package format: uploads, malware and 'bricker' scans, a signed scanned-clean stamp."
+license = "MIT"
+
+[[bin]]
+name = "appp"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["full"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+ed25519-dalek = "2"
+getrandom = "0.3"
+sha2 = "0.10"
+plist = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+regex = "1"
