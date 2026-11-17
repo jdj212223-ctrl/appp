@@ -2,10 +2,12 @@
 //!
 //!   appp serve [--data DIR] [--addr 127.0.0.1:8787] [--name NAME]   run the upload server
 //!   appp pack  Foo.app [--author NAME] [--description TEXT]           make Foo.appp (unstamped)
+//!   appp pack  phone-app-folder/                                      zip a RealismPhoneOS app (manifest.json + app.json)
 //!   appp verify Foo.appp [--key HEX]                                  check its "scanned clean" stamp
 //!   appp scan  Foo.app|Foo.appp|folder                                run the scan locally and print the report
 
 mod package;
+mod phone;
 mod scan;
 mod server;
 mod stamp;
@@ -45,6 +47,16 @@ async fn main() {
         }
         Some("pack") => {
             let Some(app) = args.get(1) else { usage() };
+            // A RealismPhoneOS app folder (manifest.json + app.json): zip it as-is.
+            let dir = Path::new(app.trim_end_matches('/'));
+            if dir.join("app.json").is_file() {
+                let out = dir.with_extension("appp");
+                match package::zip_dir(dir, &out, &[]) {
+                    Ok(()) => println!("✓ made {}", out.display()),
+                    Err(e) => { eprintln!("✗ {e}"); std::process::exit(1) }
+                }
+                return;
+            }
             match package::pack(Path::new(app), &flag(&args, "--author").unwrap_or_default(), &flag(&args, "--description").unwrap_or_default()) {
                 Ok(p) => println!("✓ made {}", p.display()),
                 Err(e) => {
@@ -75,7 +87,14 @@ async fn main() {
             let Some(target) = args.get(1) else { usage() };
             let p = Path::new(target);
             let (root, tmp) = if p.is_dir() { (p.to_path_buf(), None) } else { let t = unpack_tmp(p); (t.clone(), Some(t)) };
-            let r = scan::scan(&root, &Default::default());
+            let r = if root.join("app.json").is_file() {
+                let a = std::fs::read(root.join("app.json")).unwrap_or_default();
+                let app: serde_json::Value = serde_json::from_slice(&a).unwrap_or_default();
+                let m: serde_json::Value = std::fs::read(root.join("manifest.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+                phone::scan(&m, &app, a.len())
+            } else {
+                scan::scan(&root, &Default::default())
+            };
             if let Some(t) = tmp {
                 let _ = std::fs::remove_dir_all(t);
             }

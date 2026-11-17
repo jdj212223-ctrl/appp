@@ -1,0 +1,1 @@
+{"start":"main","screens":{"main":{"title":"Cookie Tap","text":["A warm cookie.","Tap it!"],"buttons":[{"label":"Tap the cookie","do":["fun","sound pling","open yum"]}]},"yum":{"title":"Yum!","text":["You ate the cookie.","+mood"],"buttons":[{"label":"Another one","do":["open main"]}]}}}

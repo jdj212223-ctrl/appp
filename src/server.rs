@@ -3,7 +3,7 @@
 //! data/quarantine and never get a download link.
 
 use crate::package::{self, Manifest};
-use crate::{scan, stamp};
+use crate::{phone, scan, stamp};
 use axum::extract::{DefaultBodyLimit, Multipart, Path as UrlPath, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -36,6 +36,8 @@ pub async fn serve(data: PathBuf, addr: String, name: String) {
             description TEXT, uploaded_at INTEGER, size INTEGER, report TEXT);",
     )
     .unwrap();
+    // "mac" = a macOS .app, "phone" = a RealismPhoneOS app (added in 0.2).
+    let _ = db.execute("ALTER TABLE apps ADD COLUMN kind TEXT DEFAULT 'mac'", []);
     let key = stamp::load_or_create_key(&data);
     let state = Arc::new(App { data, db: Mutex::new(db), key, name });
     let app = Router::new()
@@ -46,6 +48,8 @@ pub async fn serve(data: PathBuf, addr: String, name: String) {
         .route("/apps/{id}/icon.png", get(icon))
         .route("/api/apps", get(api_apps))
         .route("/api/apps/{id}", get(api_app))
+        .route("/api/phone/apps", get(api_phone_apps))
+        .route("/api/phone/apps/{id}", get(api_phone_app))
         .route("/stamp-key", get(stamp_key))
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state);
@@ -84,6 +88,7 @@ struct Row {
     uploaded_at: i64,
     size: i64,
     report: serde_json::Value,
+    kind: String,
 }
 
 fn rows(app: &App, where_sql: &str, p: &[&dyn rusqlite::ToSql]) -> Vec<Row> {
@@ -91,7 +96,7 @@ fn rows(app: &App, where_sql: &str, p: &[&dyn rusqlite::ToSql]) -> Vec<Row> {
     let mut st = db
         .prepare(&format!(
             "SELECT id,status,IFNULL(name,''),IFNULL(version,''),IFNULL(bundle_id,''),IFNULL(author,''),IFNULL(description,''),
-             IFNULL(uploaded_at,0),IFNULL(size,0),IFNULL(report,'{{}}') FROM apps {where_sql} ORDER BY uploaded_at DESC"
+             IFNULL(uploaded_at,0),IFNULL(size,0),IFNULL(report,'{{}}'),IFNULL(kind,'mac') FROM apps {where_sql} ORDER BY uploaded_at DESC"
         ))
         .unwrap();
     st.query_map(p, |r| {
@@ -106,6 +111,7 @@ fn rows(app: &App, where_sql: &str, p: &[&dyn rusqlite::ToSql]) -> Vec<Row> {
             uploaded_at: r.get(7)?,
             size: r.get(8)?,
             report: serde_json::from_str(&r.get::<_, String>(9)?).unwrap_or_default(),
+            kind: r.get(10)?,
         })
     })
     .unwrap()
@@ -150,8 +156,9 @@ async fn index(State(app): S) -> Html<String> {
     for r in &list {
         cards += &format!(
             r#"<a class="card app" href="/apps/{id}"><div class="icon" style="background-image:url(/apps/{id}/icon.png)"></div>
-<b>{n}</b><span class="dim small">{v} · {a}</span><span class="small">{d}</span></a>"#,
+<b>{n}</b><span class="dim small">{k} · {v} · {a}</span><span class="small">{d}</span></a>"#,
             id = r.id,
+            k = if r.kind == "phone" { "📱 RealismPhoneOS" } else { "💻 Mac" },
             n = esc(&r.name),
             v = esc(&r.version),
             a = esc(if r.author.is_empty() { "unknown author" } else { &r.author }),
@@ -161,15 +168,16 @@ async fn index(State(app): S) -> Html<String> {
     if list.is_empty() {
         cards = r#"<p class="dim">No apps yet. <a href="/upload">Upload the first one.</a></p>"#.into();
     }
-    page("Apps", &format!(r#"<h1>Apps</h1><p class="dim">Every app here passed the malware and bricker scan and carries a signed “scanned clean” stamp.</p><div class="grid">{cards}</div>"#))
+    page("Apps", &format!(r#"<h1>Apps</h1><p class="dim">The RealismPhoneOS App Store (and Mac apps). Every app here passed the bricker / spyware / adware scan and carries a signed “scanned clean” stamp.</p><div class="grid">{cards}</div>"#))
 }
 
 async fn upload_page() -> Html<String> {
     page(
         "Upload",
         r#"<h1>Upload an app</h1>
-<p class="dim">A <b>.appp</b> package, or a <b>zipped .app</b> (Finder: right-click the app → Compress). It's scanned before anyone can download it:
-known malware, anything that could brick a device (deleting launchd, the kernel or boot files, wiping disks, turning off SIP), and the code signature.</p>
+<p class="dim">A <b>RealismPhoneOS app</b> (.appp with manifest.json + app.json), a Mac <b>.appp</b>, or a <b>zipped .app</b>. It's scanned before anyone can download it.
+Phone apps: rejected if they'd <b>brick the phone</b> (delete realboot, realkernel or realism-launchd), are <b>spyware</b> (share your location without asking) or <b>adware</b> (ads in the background).
+Mac apps: known malware, anything that could brick a Mac (launchd, kernel, boot files, wiping disks, SIP), and the code signature.</p>
 <form class="card" method="post" action="/upload" enctype="multipart/form-data">
 <label>File</label><input type="file" name="file" accept=".appp,.zip" required>
 <label>Author <span class="dim">(optional)</span></label><input name="author" maxlength="80">
@@ -227,6 +235,9 @@ fn process(app: &App, id: &str, incoming: &Path, author: String, description: St
     let result = (|| -> Result<(Manifest, scan::Report), (String, scan::Report)> {
         let fail = |m: String| (m, scan::Report::default());
         package::unzip(incoming, &raw).map_err(fail)?;
+        if raw.join("app.json").is_file() {
+            return process_phone(app, id, &raw, &pkg, &author, &description);
+        }
         // An uploaded .appp brings its manifest (and maybe old extras); a zipped .app gets one made for it.
         let up_manifest: Option<Manifest> = fs::read(raw.join("manifest.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
         let app_dir = up_manifest
@@ -283,9 +294,9 @@ fn process(app: &App, id: &str, incoming: &Path, author: String, description: St
             match stamped {
                 Ok(()) => {
                     db.execute(
-                        "UPDATE apps SET status='clean',name=?2,version=?3,bundle_id=?4,author=?5,description=?6,report=?7,size=?8 WHERE id=?1",
+                        "UPDATE apps SET status='clean',name=?2,version=?3,bundle_id=?4,author=?5,description=?6,report=?7,size=?8,kind=?9 WHERE id=?1",
                         params![id, m.name, m.version, m.bundle_id, m.author, m.description, serde_json::to_string(&report).unwrap(),
-                            fs::metadata(&out).map(|x| x.len() as i64).unwrap_or(0)],
+                            fs::metadata(&out).map(|x| x.len() as i64).unwrap_or(0), if pkg.join("app.json").is_file() { "phone" } else { "mac" }],
                     )
                     .unwrap();
                     let _ = fs::remove_file(incoming);
@@ -306,6 +317,70 @@ fn process(app: &App, id: &str, incoming: &Path, author: String, description: St
         }
     }
     let _ = fs::remove_dir_all(&work);
+}
+
+/// A RealismPhoneOS app: manifest.json + app.json (+ icon.png). Checked with the phone rules (bricker, spyware,
+/// adware, broken), then packaged like any other .appp.
+fn process_phone(app: &App, id: &str, raw: &Path, pkg: &Path, author: &str, description: &str) -> Result<(Manifest, scan::Report), (String, scan::Report)> {
+    let fail = |m: String| (m, scan::Report::default());
+    let app_bytes = fs::read(raw.join("app.json")).map_err(|e| fail(e.to_string()))?;
+    let app_json: serde_json::Value = serde_json::from_slice(&app_bytes).map_err(|e| fail(format!("broken: app.json isn't valid JSON ({e})")))?;
+    let mut manifest: serde_json::Value = fs::read(raw.join("manifest.json")).ok().and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or_else(|| fail("broken: no readable manifest.json".into()))?;
+    if !author.is_empty() {
+        manifest["author"] = author.into();
+    }
+    if !description.is_empty() {
+        manifest["description"] = description.into();
+    }
+    let g = |k: &str| manifest.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let _ = app.db.lock().unwrap().execute("UPDATE apps SET name=?2,version=?3,bundle_id='',kind='phone' WHERE id=?1", params![id, g("name"), g("version")]);
+    let report = phone::scan(&manifest, &app_json, app_bytes.len());
+    if report.verdict != "clean" {
+        return Err(("rejected by the scan".into(), report));
+    }
+    fs::create_dir_all(pkg).map_err(|e| fail(e.to_string()))?;
+    fs::write(pkg.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).map_err(|e| fail(e.to_string()))?;
+    fs::write(pkg.join("app.json"), &app_bytes).map_err(|e| fail(e.to_string()))?;
+    if raw.join("icon.png").is_file() {
+        let _ = fs::copy(raw.join("icon.png"), pkg.join("icon.png"));
+        let _ = fs::copy(raw.join("icon.png"), app.data.join("icons").join(format!("{id}.png")));
+    }
+    let m = Manifest { name: g("name"), version: g("version"), bundle_id: String::new(), author: g("author"), description: g("description"), app_path: "app.json".into() };
+    Ok((m, report))
+}
+
+/// Clean phone apps, for the in-game App Store.
+async fn api_phone_apps(State(app): S) -> Json<Vec<serde_json::Value>> {
+    Json(rows(&app, "WHERE status='clean' AND kind='phone'", &[]).into_iter().map(|r| {
+        let perms = phone_manifest(&app, &r.id).and_then(|m| m.get("permissions").cloned()).unwrap_or_default();
+        serde_json::json!({ "id": r.id, "name": r.name, "version": r.version, "author": r.author, "description": r.description,
+            "permissions": perms, "warnings": r.report.get("warnings").cloned().unwrap_or_default() })
+    }).collect())
+}
+
+fn phone_file(app: &App, id: &str, name: &str) -> Option<Vec<u8>> {
+    let f = fs::File::open(app.data.join("apps").join(format!("{id}.appp"))).ok()?;
+    let mut z = zip::ZipArchive::new(f).ok()?;
+    let mut e = z.by_name(name).ok()?;
+    let mut v = Vec::new();
+    std::io::Read::read_to_end(&mut e, &mut v).ok()?;
+    Some(v)
+}
+
+fn phone_manifest(app: &App, id: &str) -> Option<serde_json::Value> {
+    serde_json::from_slice(&phone_file(app, id, "manifest.json")?).ok()
+}
+
+/// One clean phone app, ready to install: its manifest and app.json.
+async fn api_phone_app(State(app): S, UrlPath(id): UrlPath<String>) -> Response {
+    if !valid_id(&id) || rows(&app, "WHERE id=?1 AND status='clean' AND kind='phone'", &[&id]).is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let (Some(m), Some(a)) = (phone_manifest(&app, &id), phone_file(&app, &id, "app.json").and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    Json(serde_json::json!({ "id": id, "manifest": m, "app": a })).into_response()
 }
 
 fn bad_hashes(data: &Path) -> HashSet<String> {
@@ -361,10 +436,11 @@ async fn app_page(State(app): S, UrlPath(id): UrlPath<String>) -> Response {
     let files = rep.get("files").and_then(|x| x.as_u64()).unwrap_or(0);
     let body = format!(
         r#"<div class="card" style="display:flex;gap:18px;align-items:center"><div class="icon" style="width:96px;height:96px;border-radius:22px;background-image:url(/apps/{id}/icon.png)"></div>
-<div><h1 style="margin:0">{n}</h1><div class="dim">{v} · {b} · {a}</div><p style="margin:10px 0 0">{status}</p></div></div>
+<div><h1 style="margin:0">{n}</h1><div class="dim">{k} · {v} {b} · {a}</div><p style="margin:10px 0 0">{status}</p></div></div>
 <div class="card" style="margin-top:14px"><p>{d}</p><div class="dim small">{files} files · {kb} KB</div>{details}</div>"#,
         id = r.id,
         n = esc(if r.name.is_empty() { "Upload" } else { &r.name }),
+        k = if r.kind == "phone" { "📱 RealismPhoneOS app" } else { "💻 Mac app" },
         v = esc(&r.version),
         b = esc(&r.bundle_id),
         a = esc(if r.author.is_empty() { "unknown author" } else { &r.author }),

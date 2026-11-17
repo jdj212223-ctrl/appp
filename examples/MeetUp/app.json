@@ -1,0 +1,1 @@
+{"start":"main","screens":{"main":{"title":"Meet Up","text":["Lost your friends?"],"buttons":[{"label":"Where am I?","do":["location"]},{"label":"Share where I am","do":["share_location","toast Location shared","sound ding"]}]}}}
