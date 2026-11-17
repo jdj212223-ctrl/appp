@@ -8,7 +8,7 @@
 //!   icon.png       (optional)
 //!
 //! Actions: say <text> · toast <text> · sound ding|chime|pling|bell · open <screen> · fun · rth (drones come home,
-//! needs "drones") · location (shows YOU your coordinates, needs "location") · share_location (tells every player where
+//! needs "drones") · drone_status (battery, distance and props of your drones, needs "drones") · location (shows YOU your coordinates, needs "location") · share_location (tells every player where
 //! you are, needs "location") · delete <path> (needs "files") · ad <text> (a pop-up ad).
 //!
 //! The scan (here in the App Store, and the same rules in the in-game sideload scanner) rejects:
@@ -87,7 +87,8 @@ pub fn scan(manifest: &Value, app: &Value, app_bytes: usize) -> Report {
                 "open" if screens.contains_key(arg) => {}
                 "open" => r.problems.push(format!("broken: {where_} opens a screen that doesn't exist (\"{arg}\")")),
                 "fun" => {}
-                "rth" if has("drones") => {}
+                "rth" | "drone_status" if has("drones") => {}
+                "drone_status" => r.problems.push(format!("broken: {where_} reads your drones without the \"drones\" permission")),
                 "rth" => r.problems.push(format!("broken: {where_} controls drones without the \"drones\" permission")),
                 "location" if has("location") => {}
                 "location" => r.problems.push(format!("spyware: {where_} reads your location without asking (\"location\" permission)")),

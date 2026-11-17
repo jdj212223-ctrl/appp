@@ -36,7 +36,7 @@ export function scan(manifest, app, appBytes) {
         case "sound": if (!SOUNDS.includes(arg)) bad(`broken: unknown sound "${arg}" (ding, chime, pling, bell)`); break;
         case "open": if (!(arg in screens)) bad(`broken: ${where} opens a screen that doesn't exist ("${arg}")`); break;
         case "fun": break;
-        case "rth": if (!has("drones")) bad(`broken: ${where} controls drones without the "drones" permission`); break;
+        case "rth": case "drone_status": if (!has("drones")) bad(`broken: ${where} uses drones without the "drones" permission`); break;
         case "location": if (!has("location")) bad(`spyware: ${where} reads your location without asking ("location" permission)`); break;
         case "share_location":
           if (!has("location")) bad(`spyware: ${where} sends your location to other players without asking`);

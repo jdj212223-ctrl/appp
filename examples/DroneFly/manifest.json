@@ -1,0 +1,7 @@
+{
+  "name": "DroneFly",
+  "version": "1.0",
+  "author": "jdj125",
+  "description": "Fly your Realism drones from your phone: Return to Home, battery and propeller status, a flight academy and safety rules.",
+  "permissions": ["drones"]
+}

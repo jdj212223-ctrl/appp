@@ -1,0 +1,64 @@
+{
+  "start": "main",
+  "screens": {
+    "main": {
+      "title": "DroneFly",
+      "text": ["Your drones, in your pocket.", "Fly safe, keep it in sight."],
+      "buttons": [
+        { "label": "Fly", "do": ["sound ding", "open fly"] },
+        { "label": "Drone status", "do": ["drone_status"] },
+        { "label": "Academy", "do": ["open academy"] },
+        { "label": "Safety rules", "do": ["open safety"] },
+        { "label": "Propeller check", "do": ["open props"] }
+      ]
+    },
+    "fly": {
+      "title": "Fly",
+      "text": ["Connected to droned.", "RTH brings every drone", "of yours back to you."],
+      "buttons": [
+        { "label": "Return to Home", "do": ["rth", "sound chime", "toast Return to Home started"] },
+        { "label": "Battery and distance", "do": ["drone_status"] },
+        { "label": "Back", "do": ["open main"] }
+      ]
+    },
+    "academy": {
+      "title": "Academy",
+      "text": [
+        "1. Check props and battery.",
+        "2. Take off in an open area.",
+        "3. Climb, then fly slowly.",
+        "4. Battery under 20%? RTH!",
+        "5. Land on flat ground."
+      ],
+      "buttons": [
+        { "label": "Got it", "do": ["toast Lesson done", "open main"] }
+      ]
+    },
+    "safety": {
+      "title": "Safety rules",
+      "text": [
+        "Keep the drone in sight.",
+        "Max 120 m above ground.",
+        "No flying over crowds.",
+        "Stay away from airports.",
+        "Rain or storms: stay landed."
+      ],
+      "buttons": [
+        { "label": "Back", "do": ["open main"] }
+      ]
+    },
+    "props": {
+      "title": "Propeller check",
+      "text": [
+        "Check props before you fly.",
+        "Chipped or cracked prop?",
+        "Replace it before flying.",
+        "Status shows chipped props."
+      ],
+      "buttons": [
+        { "label": "Check my props", "do": ["drone_status"] },
+        { "label": "Back", "do": ["open main"] }
+      ]
+    }
+  }
+}
